@@ -59,6 +59,7 @@ for year in range(2012, 2019):
     for teamID in teams:
         url = "https://www.baseball-reference.com/teams/" + teamID + "/" + str(year) + ".shtml"
         temp = pullTable(url, "appearances")
+        temp['year'], temp['team'] = [year, teamID]
         players = pd.concat([players, temp])
 
 players.to_csv('./Data/PlayerSalaries.csv')
