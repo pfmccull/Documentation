@@ -1,0 +1,224 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+ 
+
+```{r}
+library(stringr)
+library(tidyverse)
+library(lubridate)
+```
+
+Load data and correct column name. 
+```{r}
+arb.figures <- read.csv("./Data/SalaryArbitration_MLBTR.csv", stringsAsFactors = F)
+colnames(arb.figures)[1] <- 'Player'
+arb.figures <- na.omit(arb.figures)
+```
+
+Split player names into first and last names
+```{r}
+arb.figures$nameFirst <-str_split_fixed(arb.figures$Player, " ", 2)[,1]
+arb.figures$nameLast <- str_split_fixed(arb.figures$Player, " ", 2)[,2]
+# fix names for merging with Lahman database
+arb.figures[arb.figures$nameFirst == "A.J.", 'nameFirst'] <- "A. J."
+arb.figures[arb.figures$nameFirst == "C.J.", 'nameFirst'] <- "C. J."
+arb.figures[arb.figures$nameFirst == "J.A.", 'nameFirst'] <- "J. A."
+arb.figures[arb.figures$nameFirst == "J.C.", 'nameFirst'] <- "J. C."
+arb.figures[arb.figures$nameFirst == "J.D.", 'nameFirst'] <- "J. D."
+arb.figures[arb.figures$nameFirst == "J.J.", 'nameFirst'] <- "J. J."
+arb.figures[arb.figures$nameFirst == "J.P.", 'nameFirst'] <- "J. P."
+arb.figures[arb.figures$nameFirst == "J.T.", 'nameFirst'] <- "J. T."
+arb.figures[arb.figures$nameFirst == "T.J.", 'nameFirst'] <- "T. J."
+arb.figures[arb.figures$nameFirst == "Yolmer", 'nameFirst'] <- "Carlos"
+arb.figures[arb.figures$Player == 'Lance McCullers Jr.', c('nameFirst')] <- 'Lance'
+arb.figures[arb.figures$Player == 'Lance McCullers Jr.', c('nameLast')] <- 'McCullers'
+arb.figures[arb.figures$Player == 'Jonathan Gray', c('nameFirst')] <- 'Jon'
+arb.figures[arb.figures$Player == 'Matt Joyce', c('nameFirst')] <- 'Matthew'
+arb.figures[arb.figures$nameLast == "D'Arnaud", 'nameLast'] <- "d'Arnaud"
+arb.figures[arb.figures$nameLast == "Milone", 'nameFirst'] <- "Tommy"
+arb.figures[arb.figures$nameFirst == "Zack" & arb.figures$nameLast == 'Wheeler', 'nameFirst'] <- "Zach"
+arb.figures[arb.figures$nameLast == "de Aza", 'nameLast'] <- "De Aza"
+arb.figures[arb.figures$nameLast == "Edwards Jr.", 'nameLast'] <- "Edwards"
+arb.figures[arb.figures$nameLast == "DeShields Jr.", 'nameLast'] <- "DeShields"
+arb.figures[arb.figures$nameLast == "Bradley Jr.", 'nameLast'] <- "Bradley"
+arb.figures[arb.figures$nameLast == "Souza Jr.", 'nameLast'] <- "Souza"
+arb.figures[arb.figures$nameFirst == "Felipe" & arb.figures$nameLast == 'Vazquez', 'nameLast'] <- "Rivero"
+arb.figures[arb.figures$nameFirst == "John" & arb.figures$nameLast == 'Ryan Murphy', c('nameFirst', 'nameLast')] <- c('J. R.', 'Murphy')
+arb.figures[arb.figures$nameLast == "Upton, Jr.", 'nameLast'] <- "Upton"
+arb.figures[arb.figures$Player == 'Michael Dunn', c('nameFirst')] <- 'Mike'
+arb.figures[arb.figures$Player == 'Michael Foltynewicz', c('nameFirst')] <- 'Mike'
+arb.figures[arb.figures$Player == 'Michael Fiers', c('nameFirst')] <- 'Mike'
+arb.figures[arb.figures$Player == 'Nate Eovaldi', c('nameFirst')] <- 'Nathan'
+arb.figures[arb.figures$Player == 'Nicholas Castellanos', c('nameFirst')] <- 'Nick'
+arb.figures[arb.figures$Player == 'Samuel Freeman', c('nameFirst')] <- 'Sam'
+arb.figures[arb.figures$Player == 'Norichika Aoki', c('nameFirst')] <- 'Nori'
+arb.figures[arb.figures$Player == 'Juan Carlos Oviedo', c('nameFirst', 'nameLast')] <- c('Juan Carlos', 'Oviedo')
+
+```
+
+Merge with the lahman master file for playerIDs.
+```{r}
+# Load lahman database
+lahman.master <- read.csv('./Data/Lahman/People.csv') 
+# remove players who debuted before 200 to minimize duplicates
+lahman.master <- lahman.master[!(is.na(lahman.master$debut)),]
+lahman.master$debut <- as.Date(lahman.master$debut, "%Y-%m-%d")
+lahman.master$birthDate <- as.Date(lahman.master$birthDate, "%Y-%m-%d")
+
+# Filter old players for the merging with first and last names
+lahman.master <- lahman.master %>% 
+  filter(year(debut) > 1995)
+
+# Merge arbitration and lahman data
+arb.master <- left_join(arb.figures, lahman.master, by = c('nameFirst', 'nameLast'))
+
+```
+
+Now remove the duplicates 
+```{r}
+# Find IDs of players who got added because they have the same first and last name as a player in the arbitration
+# data
+wrong.IDs <- data.frame(bbrefID = c('carpeda02', 'cartech01', 'duffyma02', 'cruzne01',
+                                    'fernajo01', 'fieldjo02', 'garcilu01', 'garcilu02',
+                                    'gonzami04', 'gonzami05', 'hatchch01', 'martica03', 
+                                    'ramirer01', 'ramirra03', 'reynoma03', 'rodrifr03',
+                                    'taylomi01', 'fernajo03', 'fernajo04', 'guerrja02'))
+
+# Remove the erroneously added players
+arb.master <- arb.master[!(arb.master$bbrefID %in% wrong.IDs$bbrefID),] 
+
+```
+
+
+Get previous year salary
+```{r}
+# LOad Lahman salary data and subtract previous year to get current yet
+lahman.salaries <- read.csv('./Data/Lahman/Salaries.csv') 
+arb.master$prev.year <- arb.master$Year - 1
+
+# Get previous salary
+prev.salary <- left_join(arb.master, 
+                        lahman.salaries[,c('yearID', 'playerID', 'salary')],
+                        by = c('bbrefID' = 'playerID', 'prev.year' = 'yearID'))
+arb.master$prev.salary <- prev.salary$salary
+
+#select limited columns
+arb.master2 <- arb.master[, c(1:14, 18, 28:32, 36:37)]
+sum(is.na(arb.master2$prev.salary))
+```
+That are a lot of missing values
+
+
+Add baseball reference scraped salaries to existing data frame if values are missing for the current value
+```{r}
+# read in BR data
+BR.salaries <- read.csv("./Data/PlayerSalaryBR.csv", stringsAsFactors = F)
+
+# get playerID for BR.salaries
+#BR.salaries <- left_join(BR.salaries, lahman.master[,c('bbrefID', 'birthDate', 'nameFirst', 'nameLast')], 
+#                         by = c('bbrefID' = 'playerID'))
+
+# Add BR salaries to dataframe
+arb.master.salaries <- arb.master2 %>%
+  left_join(BR.salaries[,c('Salary', 'year', 'bbrefID')],
+            by = c('playerID' = 'bbrefID', c('prev.year' = 'year')))
+
+# Set NAs to 0 for comparison 
+arb.master.salaries[is.na(arb.master.salaries$Salary) | arb.master.salaries$Salary == "",'Salary'] <- 0
+arb.master.salaries[is.na(arb.master.salaries$prev.salary) | arb.master.salaries$prev.salary == "",'prev.salary'] <- 0
+
+# Remove symbols
+arb.master.salaries$Salary <- gsub('\\$|,', "", arb.master.salaries$Salary)
+
+# Add BR salaries if exisiting previous salary is missing
+arb.master.salaries[arb.master.salaries$prev.salary == "0", 'prev.salary'] <- 
+  arb.master.salaries[arb.master.salaries$prev.salary == "0", 'Salary']
+
+# Remove BR salaries from df
+arb.master.final <- arb.master.salaries[,-25]
+
+# Find number of missing salaries
+sum(arb.master.final$prev.salary == 0)
+
+```
+Still have missing salaries
+
+
+Combine and clean up salary info. 
+```{r}
+# Remove MM and $, change to numeric and convert to millions
+arb.master.final$Player.Amt.<- as.numeric(gsub('\\$|M', "", arb.master.final$Player.Amt.))*1000000
+arb.master.final$Team.Amt.<- as.numeric(gsub('\\$|M', "", arb.master.final$Team.Amt.))*1000000
+arb.master.final$Midpoint<- as.numeric(gsub('\\$|M', "", arb.master.final$Midpoint))*1000000
+arb.master.final$Prev.Salary<- as.numeric(gsub('\\$|M', "", arb.master.final$Prev.Salary))*1000000
+
+# Further check existing salaries 
+arb.master.final[is.na(arb.master.final$Player.Amt.), 'Player.Amt.'] <- 0
+arb.master.final[is.na(arb.master.final$Team.Amt.), 'Team.Amt.'] <- 0
+arb.master.final[is.na(arb.master.final$Midpoint), 'Midpoint'] <- 0
+arb.master.final[is.na(arb.master.final$Prev.Salary), 'Prev.Salary'] <- 0
+arb.master.final[arb.master.final$Prev.Salary == 0, "Prev.Salary"] <-
+  arb.master.final[arb.master.final$Prev.Salary == 0, 'prev.salary']
+arb.master.final <- arb.master.final[,-24]
+
+sum(arb.master.final$Prev.Salary == 0)
+```
+Less missing values
+
+# Add unknown valeus
+```{r}
+# See characteristics the players with missing salaries
+arb.master.final[arb.master.final$Prev.Salary == 0, 1:5]
+# Many have Super 2 designations, let's get minimum salaries by year 
+
+# Get super minimum salaries
+min.salaries <- data.frame('Year' = c(2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019),
+                           'Salary.Min' = 1000*c(414, 480, 490, 500, 507.5, 507.5, 535, 545, 555))
+
+# Assign minimum salaries to super 2s
+arb.master.final <- inner_join(arb.master.final, min.salaries, by = c('prev.year' = 'Year'))
+arb.master.final[arb.master.final$Prev.Salary == 0 & arb.master2$Super2 == "Yes", 'Prev.Salary'] <-
+  arb.master.final[arb.master.final$Prev.Salary == 0 & arb.master2$Super2 == "Yes", 'Salary.Min'] 
+
+# Assign minimum salaries to players with less than 3.16 years of service
+arb.master.final[arb.master.final$Prev.Salary == 0 & arb.master.final$Service < 3.2, 'Prev.Salary'] <- 
+  arb.master.final[arb.master.final$Prev.Salary == 0 & arb.master.final$Service < 3.2, 'Salary.Min'] 
+
+arb.master.final[arb.master.final$Prev.Salary == 0, c('Player', 'Year', 'Team', 'Service', 'Prev.Salary')]
+```
+Much better
+
+Now these will have to be done manually
+```{r}
+# Get previous salaries for players with missing values
+arb.master.final[arb.master.final$Prev.Salary == 0, 'Prev.Salary'] <- c(507500, 507500, 507500,
+                                                                        507500, 2000000, 500000,
+                                                                        490000, 545000, 9715847,
+                                                                        414000, 750000, 557500,
+                                                                        1625000, 414000, 480000, 
+                                                                        545000, 507500, 625000,
+                                                                        507500, 490000, 414000,
+                                                                        1475000, 500000, 500000,
+                                                                        2050000, 2500000)
+
+arb.master.final$Prev.Salary<- as.numeric(gsub('\\$|M', "", arb.master.final$Prev.Salary))*1000000
+
+```
+
+Remove characters from settled amount with a dollar value
+```{r}
+# Find the values with Extension or Unknown
+masker <- !(arb.master.final$Settled.Amt. == 'Extension' | arb.master.final$Settled.Amt. == 'Unknown' )
+# Remove the values
+arb.master.final[masker ,'Settled.Amt.'] <-
+  as.numeric(gsub('\\$|M', "",arb.master.final[masker, 'Settled.Amt.']))*1000000 
+```
+
+
+```{r}
+write.csv(arb.master.final, file = "./Data/arbitration_contracts.csv")
+
+```
